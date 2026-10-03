@@ -77,14 +77,18 @@ A principal-engineer red-team review of ADRs 0001–0004 and CONTEXT.md identifi
 
 ## Resolved Medium Priority Issues
 
-### M1: Shared Media Volume Between FFmpeg Generator and Nginx
-**Problem:** ADR-0004 defined no Docker volume connecting the FFmpeg-generated segment files with Nginx's static serving path.
+### M1: Shared Media Volume — Real VOD Films + Procedural Live Asset, Zero Git Bloat
+
+**Problem:** ADR-0004 defined no Docker volume connecting media segment files with Nginx's static serving path. Additionally, the original purely procedural approach produces visually unconvincing test patterns that undermine the platform's demo realism.
 
 **Resolution:**
-- A named Docker volume `media_data` is defined in `docker-compose.yml`.
-- Mounted to Nginx at `/usr/share/nginx/html/media`.
-- The `scripts/generate_media.py` FFmpeg wrapper writes all `.ts` and `.m3u8` files into this volume during the `docker compose up` initialization sequence (via a `depends_on` condition or an init container pattern).
-- Content consists of **8 minutes of synthetic FFmpeg `testsrc2` video** (on-screen millisecond timecode + audio tone) at two renditions (360p @ 400kbps, 720p @ 1.2Mbps), segmented into 2-second `.ts` chunks — approximately 240 segments per rendition.
+- A named Docker volume `media_data` is defined in `docker-compose.yml`, mounted to Nginx at `/usr/share/nginx/html/media` with two sub-paths:
+  - `/media/vod/vod-{0..4}/` — one directory per VOD title (5 total), each containing `master.m3u8`, `360p.m3u8`, `720p.m3u8`, and all `.ts` segment files.
+  - `/media/live/` — the dedicated live asset directory, used exclusively by the live-clock sidecar.
+- `scripts/prepare_media.py` populates both sub-paths during `docker compose up` initialization (via `depends_on` or an init container). The script is **idempotent** — it skips downloads and re-encodes if output directories already exist.
+- **Git bloat prevention:** `media/`, `*.ts`, `*.m3u8`, and `*.mp4` are all listed in `.gitignore`. No binary media bytes are ever committed to the repository. The GitHub repo stays lightweight; media is reconstructed from the script on any fresh clone.
+- **VOD content (5 real Blender open movies):** *Big Buck Bunny*, *Sintel*, *Tears of Steel*, *Elephants Dream*, *Sprite Fright* — all CC-licensed, downloaded once from the Blender Foundation's public CDN on first run (~2–3 min), cached locally thereafter. FFmpeg transcodes each into dual-rendition HLS (360p @ 400 kbps, 720p @ 1.2 Mbps, 2-second segments). The 10,000 catalog entries are distributed evenly across these 5 titles (~2,000 per film).
+- **Live content (1 procedural FFmpeg video, ~8 min):** Generated from the FFmpeg `testsrc` source filter — no internet access required, fully offline, byte-deterministic across machines. Written exclusively to `/media/live/`, never referenced by VOD catalog entries, ensuring complete Nginx cache isolation between VOD playback traffic and live manifest/segment requests during `FLAW_CACHE_STAMPEDE` experiments.
 
 ---
 

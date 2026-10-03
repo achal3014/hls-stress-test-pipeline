@@ -14,4 +14,4 @@
   - Captures `hls.js` error events (`hlsError`) and quality level changes (`LEVEL_SWITCHED`).
 - [ ] Transmits background telemetry beacons via `navigator.sendBeacon` or asynchronous `fetch` to `/api/telemetry/playback`.
 - [ ] Transmits client viewer heartbeats every 5 seconds to `POST /api/live/heartbeat`.
-- [ ] Verification test verifies that playing both VOD (`/media/vod/master.m3u8`) and Live (`/live/live.m3u8`) streams produces telemetry beacons and heartbeats visible in browser network logs.
+- [ ] Verification test verifies that playing both VOD (`/media/vod/vod-0/master.m3u8`) and Live (`/live/live.m3u8`) streams produces telemetry beacons and heartbeats visible in browser network logs.

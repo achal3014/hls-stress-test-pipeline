@@ -11,12 +11,27 @@ Following decisions on media offloading and telemetry architecture, three operat
 
 ## Decisions
 
-### 1. Synthetic FFmpeg Video Generation (Zero Downloads)
-* **Decision:** All test media (VOD clips and live segment pools) will be generated synthetically on demand using FFmpeg filter sources (`testsrc2`, `sine`).
-* **Attributes:**
-  * Displays an on-screen running millisecond timecode clock and generates an audio tone.
-  * Generated in multiple quality renditions (e.g., 360p @ 400kbps, 720p @ 1.2Mbps) with 2-second HLS segment chunks.
-  * 100% reproducible offline, completes in <15 seconds, and commits 0 MB of media files to Git.
+### 1. Media Preparation Strategy — Hybrid Real + Procedural (Zero Git Bloat)
+
+**Context:** Pure procedural FFmpeg (e.g. `testsrc2`, `smptebars`) produces test patterns that are immediately recognizable as synthetic, undermining the platform's demo realism. Real video was considered too large to commit to Git. A hybrid approach resolves both concerns.
+
+* **Decision:** Two distinct asset classes, each prepared by `scripts/prepare_media.py` at `docker compose up` time. All media paths (`media/`, `*.ts`, `*.m3u8`, `*.mp4`) are listed in `.gitignore` — zero binary bytes are ever committed to the repository.
+
+* **VOD Assets — 5 Real Blender Open Movies:**
+  * **Titles:** *Big Buck Bunny*, *Sintel*, *Tears of Steel*, *Elephants Dream*, *Sprite Fright*.
+  * **License:** All are Creative Commons licensed and safe for public GitHub repositories.
+  * **Acquisition:** `prepare_media.py` checks for a locally cached source MP4; if absent, downloads it from the Blender Foundation's public CDN (one-time internet dependency, ~2–3 minutes on first run, skipped on subsequent runs).
+  * **Segmentation:** FFmpeg transcodes each film into dual-rendition HLS (360p @ 400 kbps, 720p @ 1.2 Mbps, 2-second `.ts` segments, static `master.m3u8` / `360p.m3u8` / `720p.m3u8` playlists) written to `/media/vod/vod-{0..4}/`.
+  * **Catalog distribution:** The 10,000 PostgreSQL catalog entries are distributed evenly across these 5 titles (~2,000 entries per film). Clicking different catalog titles plays visually distinct, recognizable film content.
+  * **Git impact:** 0 bytes — source MP4s and all HLS output are `.gitignore`d.
+
+* **Live Asset — 1 Procedural FFmpeg Video (~8 min):**
+  * **Source:** FFmpeg `testsrc` filter (v1, not v2) — no download required, fully offline.
+  * **Rationale for `testsrc` (not a Blender film):** The live sliding-window manifest requires that segment `N` is byte-identical across every generator invocation. `testsrc` produces a mathematically fixed, deterministic waveform. Real film content, once re-encoded, may produce subtly different byte sequences across machines due to encoder state — introducing manifest coherency risk when the sidecar cycles back to segment 0 after 8 minutes.
+  * **Output:** Written exclusively to `/media/live/`. Never referenced by any VOD catalog entry, preserving complete Nginx cache isolation between VOD and live workloads during `FLAW_CACHE_STAMPEDE` experiments.
+  * **Git impact:** 0 bytes — same `.gitignore` rules apply.
+
+* **Shared setup behaviour:** `prepare_media.py` is idempotent — it checks for existing output directories before downloading or generating. Re-running `docker compose up` after the first setup is fast (no redundant downloads or re-encodes).
 
 ### 2. The Single-Command Automated Experiment Runner (`run_experiment.py`)
 * **Decision:** The automated single-command runner is defined as a **required core deliverable**, not optional polish.

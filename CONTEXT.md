@@ -20,7 +20,7 @@ The core deliverable is **not** just a streaming site, but a complete **break-ob
   * Single isolated Python process. The only writer of the live manifest sequence pointer in Redis.
   * Advances `#EXT-X-MEDIA-SEQUENCE` every `TARGET_SEGMENT_DURATION` seconds.
 * **Storage & State Plane:**
-  * **PostgreSQL:** Video metadata, catalog (10,000 seed records), historical playback session records.
+  * **PostgreSQL:** Video metadata, catalog (10,000 seed records distributed evenly across 4–5 distinct VOD assets), historical playback session records.
   * **Redis:** Live sequence pointer (written only by live-clock sidecar), active viewer sessions/heartbeats, manifest micro-cache.
 * **Synthetic Client & Telemetry Plane (run on host, outside Docker):**
   * **k6:** Raw HTTP load generation simulating concurrent viewers (manifest polling, segment downloads, heartbeats). Runs on host to avoid CPU contention with stack under test.
@@ -57,7 +57,9 @@ The core deliverable is **not** just a streaming site, but a complete **break-ob
 ## 5. Tech Stack Choices
 * **Language & Framework:** Python 3.11+ / FastAPI (multi-worker Uvicorn with `PROMETHEUS_MULTIPROC_DIR`).
 * **Media Proxy:** Nginx (serving static `.ts` chunks from `media_data` volume, micro-caching live manifests).
-* **Media Generation:** FFmpeg synthetic `testsrc2` — 8 minutes, 2 renditions (360p/720p), 2-second segments (~240 chunks per rendition). Zero video files in Git.
+* **Media Preparation:** `scripts/prepare_media.py` populates the `media_data` Docker volume on first run. Zero media files committed to Git (`media/`, `*.ts`, `*.m3u8`, `*.mp4` are `.gitignore`d):
+  * **VOD (5 real Blender open movies):** *Big Buck Bunny*, *Sintel*, *Tears of Steel*, *Elephants Dream*, *Sprite Fright* — CC-licensed, downloaded once from Blender Foundation's public CDN (~2–3 min on first `docker compose up`), cached locally thereafter. FFmpeg segments each into dual-rendition HLS (360p/720p, 2-second `.ts` chunks, static playlists). The 10,000 catalog entries are distributed evenly across these 5 titles (~2,000 per film).
+  * **Live (1 procedural FFmpeg video, ~8 min):** Generated from `testsrc` filter — no download, fully offline, deterministic byte output. Stored exclusively at `/media/live/`, never referenced by VOD catalog entries, preserving clean cache isolation for thundering-herd and `FLAW_CACHE_STAMPEDE` experiments.
 * **State & Metadata:** PostgreSQL (catalog, sessions) & Redis (live sequence, ZSET heartbeat window).
 * **Load Generator:** k6 (runs on host, `--out json=results/run.json` for authoritative percentiles).
 * **Canary Browser:** Playwright + `hls.js` in-player telemetry beacon to `/api/telemetry/playback`.

@@ -11,4 +11,4 @@
 - [ ] Static `.ts` video chunks are served directly from `/media/` with `Content-Type: video/mp2t` and caching headers (`Cache-Control: max-age=86400, public`).
 - [ ] Static `.m3u8` playlists are served with `Content-Type: application/vnd.apple.mpegurl` and `Cache-Control: no-cache`.
 - [ ] Cross-Origin Resource Sharing (CORS) headers (`Access-Control-Allow-Origin: *`) are enabled for all media endpoints.
-- [ ] Client HTTP requests to `http://localhost:8080/media/vod/master.m3u8` return valid playlists and media segments stream smoothly via curl or video player.
+- [ ] Client HTTP requests to `http://localhost:8080/media/vod/vod-0/master.m3u8` (and `vod-1` through `vod-4`) return valid playlists and media segments stream smoothly via curl or video player.

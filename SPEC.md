@@ -30,8 +30,10 @@ The solution consists of:
    - **Application Control Plane:** A high-throughput API service (FastAPI, multi-worker Uvicorn) handling catalog browsing, search, playback session initialization, dynamic live manifest (`.m3u8`) generation, client heartbeat ingestion, and real-user playback telemetry ingestion.
    - **Live Clock Sidecar:** A dedicated, single-process service that monotonically advances the live broadcast sequence pointer in Redis, preventing worker split-brain and manifest drift.
    - **State & Storage Layer:** A relational database (PostgreSQL) seeded with 10,000 video records for catalog queries, and an in-memory data store (Redis) managing the live sliding window, manifest caching, and viewer sessions.
-2. **Synthetic Media Generation Engine:**
-   - An on-demand generator that produces 8 minutes of multi-rendition HLS video streams with embedded millisecond timecode clocks and audio tones using procedural video synthesis (`testsrc2`, `sine`)—committing 0 MB of media files to version control while ensuring 100% offline reproducibility.
+2. **Media Preparation Engine:**
+   - A setup script (`scripts/prepare_media.py`) that populates the `media_data` Docker volume with all HLS assets on first run. No media files are ever committed to Git — `media/` and all `.ts`, `.m3u8`, `.mp4` paths are `.gitignore`d. Two distinct strategies are used depending on workload:
+     - **VOD Assets (5 real Blender open movies):** `prepare_media.py` checks whether each source MP4 is already cached locally; if not, it downloads it via `curl`/`requests` from the Blender Foundation's public CDN (one-time internet dependency, ~2–3 min on first run). FFmpeg then segments each film into dual-rendition HLS (360p @ 400 kbps, 720p @ 1.2 Mbps) with 2-second `.ts` segments and static `.m3u8` playlists. The five titles are: *Big Buck Bunny*, *Sintel*, *Tears of Steel*, *Elephants Dream*, and *Sprite Fright* — all CC-licensed and safe for public repos. The 10,000 PostgreSQL catalog records are distributed evenly across these 5 assets (~2,000 entries per title).
+     - **Live Asset (1 procedural FFmpeg video, ~8 min):** Generated entirely from the FFmpeg `testsrc` source filter — no download required. Written exclusively to `/media/live/`, never referenced by VOD catalog entries. `testsrc` is chosen for deterministic, byte-perfect output across machines and runs, ensuring the live sliding-window manifest stays coherent when the sidecar cycles back to segment 0. Keeps the thundering-herd and `FLAW_CACHE_STAMPEDE` benchmarks fully reproducible offline.
 3. **Pluggable 6-Tier Runtime Flaw Matrix:**
    - Permanent, environment-controlled flaw toggles representing six distinct failure categories:
      - *Cache Stampede / Thundering Herd (`FLAW_CACHE_STAMPEDE`):* Live manifest caching disabled/bypassed.
@@ -103,10 +105,10 @@ The solution consists of:
    - Operates a monotonic virtual clock loop advancing the live sequence pointer in Redis at fixed segment intervals.
    - Ensures zero split-brain or sequencing race conditions across application worker processes.
 
-4. **Synthetic Video Generator:**
-   - Procedural generation utility utilizing video synthesis filters (`testsrc2`, `sine`).
-   - Creates 8 minutes of dual-rendition HLS assets (360p and 720p) with 2-second segment durations, complete with visual millisecond timecodes and audio test tones.
-   - Outputs directly into the shared media volume before platform initialization.
+4. **Media Preparation Script (`scripts/prepare_media.py`):**
+   - Idempotent setup utility that runs during `docker compose up` initialization and populates the `media_data` Docker volume. All output paths are `.gitignore`d — zero media bytes are committed to Git.
+   - **VOD content:** Downloads 5 CC-licensed Blender open movies (*Big Buck Bunny*, *Sintel*, *Tears of Steel*, *Elephants Dream*, *Sprite Fright*) from the Blender Foundation's public CDN on first run (~2–3 min); skips download if source MP4 is already cached. FFmpeg transcodes each film into dual-rendition HLS (360p @ 400 kbps, 720p @ 1.2 Mbps, 2-second `.ts` segments, static `master.m3u8` / `360p.m3u8` / `720p.m3u8` playlists) written to `/media/vod/vod-{0..4}/`. The 10,000 catalog entries are distributed evenly across these 5 titles.
+   - **Live content:** Generates ~8 minutes of video from the FFmpeg `testsrc` source filter directly into `/media/live/` — no internet access required, byte-deterministic across machines, ensuring the live sliding-window manifest stays coherent when the sidecar cycles back to segment 0.
 
 5. **Client Telemetry & Canary Probe:**
    - Minimal browser player leveraging HTML5 video and an adaptive streaming client library (`hls.js`).
@@ -122,7 +124,7 @@ The solution consists of:
 
 1. **Catalog Video Entity:**
    - Attributes: Unique identifier, title, slug, description, category, tags array, duration in seconds, HLS master manifest path, publication timestamp.
-   - Seed scale: 10,000 synthetic records with varied text length and category distribution.
+   - Seed scale: 10,000 synthetic records with varied text length and category distribution, distributed evenly across 4–5 VOD assets (e.g., `hls_manifest_path = /media/vod/vod-{id % 5}/master.m3u8`). Each of the 4–5 VOD assets is a visually distinct synthetic video; no catalog entry references the dedicated live asset path.
    - Indexing: Conditional B-tree / GIN index on title and description, activated or dropped via the database slow query flaw toggle.
 
 2. **Playback Session Entity:**
